@@ -1,56 +1,79 @@
 ﻿using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 [RequireComponent(typeof(Rigidbody2D))]
 [RequireComponent(typeof(BoxCollider2D))]
 [RequireComponent(typeof(SpriteRenderer))]
 public class DogController : MonoBehaviour
 {
-    // ーーー追従対象ーーー
     [Header("追従対象のプレイヤー")]
     [SerializeField] private PlayerController player;
 
-    // ーーーフリスビー連携ーーー
     [Header("フリスビーを投げるFrisbeeThrower")]
     [SerializeField] private FrisbeeThrower frisbeeThrower;
 
-    // ーーー追従パラメーターーーー
+    [Header("カーソル(ジャンプキャッチの着地点として使用)")]
+    [SerializeField] private CursorController cursor;
+
+    [Header("ーーーーーーー ここから下は通常モード(プレイヤー追従)関連 ーーーーーーー")]
     [Header("プレイヤーから追従する距離(軌跡上の距離、ユニット)")]
     [SerializeField] private float followDistance = 1.5f;
 
     [Header("通常モードの最大移動速度(ユニット/秒)")]
     [SerializeField] private float normalModeMoveSpeed = 6f;
 
-    // ーーー追従ディレイーーー
     [Header("プレイヤーが動き始めてから追従開始までの遅延(秒)")]
     [SerializeField] private float followStartDelay = 0.1f;
 
     [Header("プレイヤーが止まってから追従停止までの遅延(秒)")]
     [SerializeField] private float followStopDelay = 0.1f;
 
-    // ーーープレイヤー停止判定ーーー
     [Header("プレイヤーの速度がこの値未満なら「停止中」とみなす")]
     [SerializeField] private float playerStoppedSpeedThreshold = 0.1f;
 
-    // ーーー軌跡記録ーーー
     [Header("軌跡記録の最小間隔(ユニット、これ以上動いたら新しい点を記録)")]
     [SerializeField] private float trailRecordMinDistance = 0.05f;
 
     [Header("軌跡記録の最大保持数(古いものから捨てる)")]
     [SerializeField] private int trailMaxCount = 200;
 
-    // ーーー行ってこいモードーーー
+    [Header("ーーーーーーー ここから下は行ってこいモード関連 ーーーーーーー")]
     [Header("行ってこいモードの移動速度(ユニット/秒)")]
     [SerializeField] private float fetchModeMoveSpeed = 7f;
 
     [Header("フリスビー投擲を検知してから犬が動き出すまでのディレイ(秒)")]
     [SerializeField] private float fetchStartDelay = 0.2f;
 
-    [Header("フリスビーへ到達したと判定する距離(ユニット)")]
-    [SerializeField] private float fetchArriveThreshold = 0.3f;
+    [Header("フリスビーがこのY値以上犬より下にある時、段差から降りるために強制前進する")]
+    [SerializeField] private float fetchDropDownThreshold = 0.5f;
 
-    // ーーージャンプーーー
-    [Header("犬のジャンプの最高到達点の高さ(マス数)")]
+    [Header("ーーーーーーー ここから下はジャンプキャッチ・キャッチ関連 ーーーーーーー")]
+    [Header("ジャンプキャッチ判定距離(犬とフリスビーの距離がこの値以内なら発動)")]
+    [SerializeField] private float jumpCatchDistance = 1.5f;
+
+    [Header("ジャンプキャッチ最低高さ(フリスビーが犬よりこの値以上高くないと発動しない)")]
+    [SerializeField] private float jumpCatchMinHeight = 0.1f;
+
+    [Header("犬の口の位置(犬の中心からのオフセット、Xは向きで自動反転)")]
+    [SerializeField] private Vector2 mouthOffset = new Vector2(0.4f, 0.1f);
+
+    [Header("ーーーーーーー ここから下は待機モード関連 ーーーーーーー")]
+    [Header("キャッチ完了後、犬がプレイヤーの方を向くまでのディレイ(秒)")]
+    [SerializeField] private float turnToPlayerDelay = 0.3f;
+
+    [Header("待機・おかえりモード中、プレイヤーがこのY値以上犬より上にいたら衝突有効化(乗れる)")]
+    [SerializeField] private float waitingPlayerAboveThreshold = 0.5f;
+
+    [Header("ーーーーーーー ここから下はおかえりモード関連 ーーーーーーー")]
+    [Header("おかえりモードの移動速度(ユニット/秒)")]
+    [SerializeField] private float returnModeMoveSpeed = 7f;
+
+    [Header("プレイヤーとこの距離以内に近づいたらフリスビー回収&通常モードに戻る(ユニット)")]
+    [SerializeField] private float returnPickupDistance = 0.8f;
+
+    [Header("ーーーーーーー ここから下はジャンプ(物理)関連 ーーーーーーー")]
+    [Header("犬のジャンプの最高到達点の高さ(マス数、通常モードのジャンプ連動用)")]
     [SerializeField] private float jumpMaxHeight = 1f;
 
     [Header("プレイヤーのジャンプを検知してから犬がジャンプするまでの遅延(秒)")]
@@ -59,7 +82,7 @@ public class DogController : MonoBehaviour
     // ※ 重力はRigidbody 2DのGravity ScaleとUnityの重力設定から決まる
     // ※ ジャンプ初速度はそれらの値から自動で逆算される
 
-    // ーーー接地判定ーーー
+    [Header("ーーーーーーー ここから下は接地判定関連 ーーーーーーー")]
     [Header("犬の地面として扱うレイヤー(Groundのみ)")]
     [SerializeField] private LayerMask groundLayer;
 
@@ -69,7 +92,7 @@ public class DogController : MonoBehaviour
     [Header("接地判定ボックスのY方向オフセット(コライダー下端からの相対位置、負の値でさらに下)")]
     [SerializeField] private float groundCheckOffsetY = 0f;
 
-    // ーーー壁越え自動ジャンプーーー
+    [Header("ーーーーーーー ここから下は壁越え自動ジャンプ関連 ーーーーーーー")]
     [Header("壁検知ボックスのサイズ(進行方向に壁があるかチェックするセンサー)")]
     [SerializeField] private Vector2 wallCheckSize = new Vector2(0.1f, 0.6f);
 
@@ -79,14 +102,29 @@ public class DogController : MonoBehaviour
     [Header("壁検知ボックスのY方向オフセット(犬の中心からの相対位置)")]
     [SerializeField] private float wallCheckOffsetY = 0f;
 
-    // ーーー衝突制御ーーー
+    [Header("壁越え自動ジャンプの方式(A案=事前計測、B案=段階的)")]
+    [SerializeField] private WallJumpMode wallJumpMode = WallJumpMode.Predictive;
+
+    [Header("壁越え自動ジャンプの最大マス数")]
+    [SerializeField] private int maxAutoJumpHeight = 3;
+
+    [Header("1マスのワールドサイズ(ユニット)")]
+    [SerializeField] private float cellSize = 1f;
+
+    [Header("壁の高さ計測位置の犬中心からの水平オフセット(進行方向で自動反転、壁の少し奥側を測る)")]
+    [SerializeField] private float wallProbeOffsetX = 1f;
+
+    [Header("壁の高さ計測ボックスのサイズ(1マス分より少し小さめがおすすめ)")]
+    [SerializeField] private Vector2 wallProbeSize = new Vector2(0.8f, 0.8f);
+
+    [Header("ーーーーーーー ここから下はプレイヤーとの衝突制御(通常モード等)関連 ーーーーーーー")]
     [Header("衝突を「上から」と判定する法線Y成分の閾値(0.5なら法線Yが-0.5以下を上方向とみなす)")]
     [SerializeField] private float upwardCollisionThreshold = 0.5f;
 
     [Header("プレイヤーと犬の距離がこの値を超えたら、すり抜け状態を解除する")]
     [SerializeField] private float collisionResetDistance = 1.7f;
 
-    // ーーー向きーーー
+    [Header("ーーーーーーー ここから下はスプライト関連 ーーーーーーー")]
     [Header("元のスプライト画像が右向きならtrue、左向きならfalse")]
     [SerializeField] private bool spriteOriginallyFacesRight = true;
 
@@ -96,38 +134,63 @@ public class DogController : MonoBehaviour
     private SpriteRenderer spriteRenderer;
     private Rigidbody2D playerRb;
 
+    // ーーー入力ーーー
+    private PlayerInputActions inputActions;
+    private InputAction throwAction;
+
     // ーーーモード管理ーーー
-    // 犬の動きの状態
     private enum DogMode
     {
-        Normal,    // 通常モード(プレイヤー追従)
-        Fetch,     // 行ってこいモード(フリスビーを追いかける)
-        Waiting    // 待機モード(フリスビー位置で停止)
+        Normal,        // 通常モード(プレイヤー追従)
+        Fetch,         // 行ってこいモード(フリスビーを追いかける)
+        JumpCatching,  // ジャンプキャッチ中(放物線軌道でカーソルX位置に着地)
+        Waiting,       // 待機モード(フリスビーをくわえてその場で停止)
+        Return         // おかえりモード(プレイヤーへ戻る)
     }
 
     private DogMode currentMode = DogMode.Normal;
 
+    // ーーー壁越え自動ジャンプの方式ーーー
+    private enum WallJumpMode
+    {
+        Predictive,  // A案：事前計測(壁の高さに応じてピッタリの高さでジャンプ)
+        Stepwise     // B案：段階的(1マス→ダメ→2マス→ダメ→3マスと上げていく)
+    }
+
     // ーーーフリスビー連携ーーー
-    private FrisbeeController trackedFrisbee;       // 追いかけ中のフリスビー
-    private float fetchStartDelayTimer = -1f;        // 行ってこいモード開始ディレイのタイマー
+    private FrisbeeController trackedFrisbee;
+    private float fetchStartDelayTimer = -1f;
+    private bool wasFrisbeeDecelerating;
+
+    // ーーージャンプキャッチ軌道情報ーーー
+    private Vector2 jumpCatchStartPos;
+    private float jumpCatchTargetX;
+    private float jumpCatchPeakY;
+    private float jumpCatchDuration;
+    private float jumpCatchElapsed;
+
+    // ーーー待機モード状態ーーー
+    private float waitingTurnTimer = -1f;
+    private bool hasTurnedToPlayer;
+    private bool waitingPlayerIsAbove;
+
+    // ーーー通常モード復帰直後の衝突再有効化保留状態ーーー
+    private bool needCollisionRestoreAfterFinish;
 
     // ーーー軌跡データーーー
-    // プレイヤーの過去位置を記録するリスト
-    // 先頭が最新、末尾が最古
-    // 犬は先頭から軌跡をたどって、followDistance分の距離になる位置を目指す
     private List<Vector2> trail = new List<Vector2>();
-    private Vector2 lastRecordedPosition;  // 最後に軌跡に記録したプレイヤー位置(間引き判定用)
+    private Vector2 lastRecordedPosition;
 
     // ーーー追従状態ーーー
-    private bool playerIsMoving;            // プレイヤーが現在動いているかの判定
-    private float playerStateChangeTimer;   // プレイヤーの状態が変わってからの経過時間
-    private bool dogShouldFollow;           // 犬が追従すべきかどうか(ディレイ反映後)
+    private bool playerIsMoving;
+    private float playerStateChangeTimer;
+    private bool dogShouldFollow;
 
     // ーーー向き状態ーーー
-    private int facingDirection;  // 現在の犬の向き(+1=右、-1=左)
+    private int facingDirection;
 
     // ーーージャンプ計算結果ーーー
-    private float calculatedJumpVelocity;  // ジャンプ初速度(プレイヤーと同じく逆算で計算)
+    private float calculatedJumpVelocity;
 
     // ーーージャンプ予約状態ーーー
     private float pendingJumpTimer = -1f;
@@ -152,70 +215,645 @@ public class DogController : MonoBehaviour
         if (player != null)
         {
             playerRb = player.GetComponent<Rigidbody2D>();
-            // 初期位置を軌跡の起点として記録しておく
             lastRecordedPosition = player.transform.position;
             trail.Add(lastRecordedPosition);
         }
 
         facingDirection = 1;
         ApplySpriteFlip();
+
+        // 入力アクションの初期化
+        inputActions = new PlayerInputActions();
+        throwAction = inputActions.Player.Throw;
+    }
+
+    private void OnEnable()
+    {
+        throwAction.Enable();
+    }
+
+    private void OnDisable()
+    {
+        throwAction.Disable();
     }
 
     private void Update()
     {
-        // フリスビー投擲を検知してモード遷移をチェック
         CheckFrisbeeThrown();
-
-        // 行ってこいモードのディレイタイマーを更新
         UpdateFetchStartDelay();
-
-        // プレイヤーの動き状態を毎フレーム更新する
         UpdatePlayerMovingState();
-
-        // ディレイを考慮して、犬が追従すべきかを決定する
         UpdateFollowDecision();
-
-        // プレイヤーの軌跡を記録する
         RecordPlayerTrail();
-
-        // 進行方向に応じて見た目を反転する
         ApplySpriteFlip();
-
-        // すり抜け中のコライダーが十分離れたら衝突を再有効化する
         UpdateIgnoredColliders();
+
+        // おかえりモード終了後、プレイヤーと十分離れたら衝突を再有効化
+        UpdateCollisionRestoreAfterFinish();
+
+        // 待機モード中のZ押下でおかえりモードへ
+        CheckReturnModeInput();
     }
 
     private void FixedUpdate()
     {
-        // ジャンプ初速度は重力に依存するので毎FixedUpdateで再計算する
         CalculateJumpVelocity();
 
-        // モードに応じて挙動を切り替える
+        // ジャンプキャッチの発動判定(全モード共通でフリスビーの状態変化を見る)
+        CheckJumpCatchTrigger();
+
         switch (currentMode)
         {
             case DogMode.Normal:
-                // 通常モード：プレイヤーのジャンプに連動、軌跡追従、壁越えジャンプ
                 HandleJumpSync();
                 UpdateDogMovement();
                 HandleStuckJump();
                 break;
 
             case DogMode.Fetch:
-                // 行ってこいモード：フリスビーへ向かう、壁越えジャンプは流用
                 UpdateFetchMovement();
                 HandleStuckJump();
+                CheckWallFallRescueCatch();
+                break;
+
+            case DogMode.JumpCatching:
+                UpdateJumpCatchMovement();
+                UpdateCaughtFrisbeePosition();
                 break;
 
             case DogMode.Waiting:
-                // 待機モード：その場で停止
                 StopHorizontalMovement();
+                UpdateWaitingTurnTimer();
+                UpdateWaitingCollision();
+                UpdateCaughtFrisbeePosition();
+                break;
+
+            case DogMode.Return:
+                UpdateReturnMovement();
+                HandleStuckJump();
+                UpdateWaitingCollision();
+                UpdateCaughtFrisbeePosition();
+                CheckPlayerNearby();
                 break;
         }
     }
 
 
+    // ーーー待機モード中のZ押下処理ーーー
+    // プレイヤーが犬に乗ってたら即フリスビーを渡す
+    // 乗ってなかったらおかえりモードに移行(犬がプレイヤーへ走る)
+
+    private void CheckReturnModeInput()
+    {
+        if (currentMode != DogMode.Waiting)
+        {
+            return;
+        }
+
+        if (!throwAction.WasPressedThisFrame())
+        {
+            return;
+        }
+
+        if (player != null && player.IsRidingDog)
+        {
+            // 乗ってる場合は即回収
+            FinishReturnMode();
+        }
+        else
+        {
+            // 乗ってない場合はおかえりモードへ
+            EnterReturnMode();
+        }
+    }
+
+
+    // ーーーおかえりモードへの遷移ーーー
+    // 待機モードの衝突制御(横すり抜け、上は乗れる)をそのまま引き継ぐ
+    // (UpdateWaitingCollisionが毎FixedUpdateで位置に応じて正しく切り替えてくれる)
+
+    private void EnterReturnMode()
+    {
+        currentMode = DogMode.Return;
+    }
+
+
+    // ーーーおかえりモードの移動処理ーーー
+    // プレイヤーへ向かって走る。フリスビーは犬の口に固定されたまま追従する
+
+    private void UpdateReturnMovement()
+    {
+        if (player == null)
+        {
+            return;
+        }
+
+        Vector2 playerPos = player.transform.position;
+        float dx = playerPos.x - transform.position.x;
+        float distanceX = Mathf.Abs(dx);
+
+        int directionToPlayer;
+        if (dx > 0f)
+        {
+            directionToPlayer = 1;
+        }
+        else
+        {
+            directionToPlayer = -1;
+        }
+
+        // 通り過ぎを防ぐ：目標が近い場合は速度を抑える
+        float maxStepDistance = returnModeMoveSpeed * Time.fixedDeltaTime;
+
+        float currentSpeed;
+        if (distanceX < maxStepDistance)
+        {
+            currentSpeed = distanceX / Time.fixedDeltaTime;
+        }
+        else
+        {
+            currentSpeed = returnModeMoveSpeed;
+        }
+
+        Vector2 v = rb.linearVelocity;
+        v.x = directionToPlayer * currentSpeed;
+        rb.linearVelocity = v;
+
+        facingDirection = directionToPlayer;
+    }
+
+
+    // ーーープレイヤー接近の判定(おかえりモード専用)ーーー
+    // 距離が近い、またはプレイヤーが犬に乗っていたら、フリスビーを回収して通常モードに戻る
+
+    private void CheckPlayerNearby()
+    {
+        if (player == null)
+        {
+            return;
+        }
+
+        // プレイヤーが犬に乗ってたら距離関係なく即回収
+        if (player.IsRidingDog)
+        {
+            FinishReturnMode();
+            return;
+        }
+
+        // 距離が一定以内なら回収
+        float distance = Vector2.Distance(transform.position, player.transform.position);
+
+        if (distance <= returnPickupDistance)
+        {
+            FinishReturnMode();
+        }
+    }
+
+
+    // ーーーおかえりモード終了処理ーーー
+    // フリスビーを消して、通常モードに戻る
+    // 衝突は無効化のまま維持(プレイヤーと重なってる状態で有効化すると押し出されるため)
+    // 十分離れたらUpdateCollisionRestoreAfterFinishで自動的に再有効化される
+
+    private void FinishReturnMode()
+    {
+        // フリスビーを消す
+        if (trackedFrisbee != null)
+        {
+            Destroy(trackedFrisbee.gameObject);
+            trackedFrisbee = null;
+        }
+
+        // 衝突再有効化を保留(プレイヤーと十分離れてから自動で有効化する)
+        needCollisionRestoreAfterFinish = true;
+
+        // 状態リセット
+        wasFrisbeeDecelerating = false;
+        waitingPlayerIsAbove = false;
+        currentMode = DogMode.Normal;
+    }
+
+
+    // ーーーおかえりモード終了後の衝突再有効化チェックーーー
+    // フリスビー回収直後はプレイヤーと重なっているので、十分離れるまで衝突無効を維持する
+    // 離れたタイミングで通常モードの衝突制御に復帰させる
+
+    private void UpdateCollisionRestoreAfterFinish()
+    {
+        if (!needCollisionRestoreAfterFinish)
+        {
+            return;
+        }
+
+        if (player == null)
+        {
+            return;
+        }
+
+        float distance = Vector2.Distance(transform.position, player.transform.position);
+
+        if (distance > collisionResetDistance)
+        {
+            SetPlayerCollisionIgnore(false);
+            needCollisionRestoreAfterFinish = false;
+        }
+    }
+
+
+    // ーーー待機モードへの遷移ーーー
+
+    private void EnterWaitingMode()
+    {
+        currentMode = DogMode.Waiting;
+        waitingTurnTimer = turnToPlayerDelay;
+        hasTurnedToPlayer = false;
+
+        ClearAllIgnoredColliders();
+
+        waitingPlayerIsAbove = false;
+        SetPlayerCollisionIgnore(true);
+    }
+
+
+    // ーーー待機モード中のプレイヤー振り向きタイマー更新ーーー
+
+    private void UpdateWaitingTurnTimer()
+    {
+        if (hasTurnedToPlayer)
+        {
+            return;
+        }
+
+        waitingTurnTimer -= Time.fixedDeltaTime;
+
+        if (waitingTurnTimer <= 0f)
+        {
+            TurnToPlayer();
+            hasTurnedToPlayer = true;
+        }
+    }
+
+
+    // ーーープレイヤーの方を向く処理ーーー
+
+    private void TurnToPlayer()
+    {
+        if (player == null)
+        {
+            return;
+        }
+
+        float dx = player.transform.position.x - transform.position.x;
+
+        if (dx > 0f)
+        {
+            facingDirection = 1;
+        }
+        else
+        {
+            facingDirection = -1;
+        }
+    }
+
+
+    // ーーー待機・おかえりモード中の衝突制御ーーー
+    // プレイヤーが犬の上にいる時だけ衝突を有効化(マリオのすり抜け床と同等の挙動)
+    // 横や下にいる時はすり抜け
+
+    private void UpdateWaitingCollision()
+    {
+        if (player == null)
+        {
+            return;
+        }
+
+        Vector2 dogPos = transform.position;
+        Vector2 playerPos = player.transform.position;
+
+        bool playerIsAboveNow = (playerPos.y - dogPos.y) >= waitingPlayerAboveThreshold;
+
+        if (playerIsAboveNow != waitingPlayerIsAbove)
+        {
+            SetPlayerCollisionIgnore(!playerIsAboveNow);
+            waitingPlayerIsAbove = playerIsAboveNow;
+        }
+    }
+
+
+    // ーーー全てのすり抜け状態を解除ーーー
+
+    private void ClearAllIgnoredColliders()
+    {
+        for (int i = 0; i < ignoredColliders.Count; i++)
+        {
+            Collider2D ignored = ignoredColliders[i];
+            if (ignored != null)
+            {
+                Physics2D.IgnoreCollision(ignored, boxCollider, false);
+            }
+        }
+        ignoredColliders.Clear();
+    }
+
+
+    // ーーープレイヤーとの衝突を有効/無効に切り替えるヘルパーーーー
+
+    private void SetPlayerCollisionIgnore(bool ignore)
+    {
+        if (player == null)
+        {
+            return;
+        }
+
+        Collider2D playerCollider = player.GetComponent<Collider2D>();
+        if (playerCollider == null)
+        {
+            return;
+        }
+
+        Physics2D.IgnoreCollision(playerCollider, boxCollider, ignore);
+    }
+
+
+    // ーーージャンプキャッチ発動判定ーーー
+    // フリスビーが減速状態に入った瞬間(=カーソル到達 or 壁衝突の瞬間)を検知
+
+    private void CheckJumpCatchTrigger()
+    {
+        if (trackedFrisbee == null)
+        {
+            wasFrisbeeDecelerating = false;
+            return;
+        }
+
+        bool isDecelNow = trackedFrisbee.IsDecelerating;
+
+        if (!wasFrisbeeDecelerating && isDecelNow)
+        {
+            TryStartJumpCatch();
+        }
+
+        wasFrisbeeDecelerating = isDecelNow;
+    }
+
+
+    // ーーージャンプキャッチ発動判定の本体ーーー
+
+    private void TryStartJumpCatch()
+    {
+        if (currentMode != DogMode.Fetch)
+        {
+            return;
+        }
+
+        if (!CheckGrounded())
+        {
+            return;
+        }
+
+        Vector2 dogPos = transform.position;
+        Vector2 frisbeePos = trackedFrisbee.Position;
+        float distance = Vector2.Distance(dogPos, frisbeePos);
+
+        if (distance > jumpCatchDistance)
+        {
+            return;
+        }
+
+        float heightDiff = frisbeePos.y - dogPos.y;
+        if (heightDiff < jumpCatchMinHeight)
+        {
+            return;
+        }
+
+        StartJumpCatch(false);  // 通常のジャンプキャッチ：カーソル位置目標
+    }
+
+
+    // ーーー壁ヒット後の落下フリスビーへの救済ジャンプキャッチーーー
+    // フリスビーが壁にぶつかって落下中、犬がジャンプキャッチ範囲内に入ったら発動
+    // (段差で詰まった時の救済策、Fetchモード中のみ毎フレーム判定)
+    // フリスビーが犬より高い位置にある時だけ発動(低い位置なら普通に走って取る)
+
+    private void CheckWallFallRescueCatch()
+    {
+        if (trackedFrisbee == null)
+        {
+            return;
+        }
+
+        if (!trackedFrisbee.DidHitWall)
+        {
+            return;
+        }
+
+        if (!trackedFrisbee.IsDecelerating)
+        {
+            return;
+        }
+
+        if (!CheckGrounded())
+        {
+            return;
+        }
+
+        Vector2 dogPos = transform.position;
+        Vector2 frisbeePos = trackedFrisbee.Position;
+        float distance = Vector2.Distance(dogPos, frisbeePos);
+
+        if (distance > jumpCatchDistance)
+        {
+            return;
+        }
+
+        // フリスビーが犬より十分高い位置にある時だけ発動
+        // (低い位置なら普通に走って取りに行ける、ジャンプキャッチで壁の向こうに飛ぶのを防ぐ)
+        float heightDiff = frisbeePos.y - dogPos.y;
+        if (heightDiff < jumpCatchMinHeight)
+        {
+            return;
+        }
+
+        // 範囲内に入った：ジャンプキャッチ発動(フリスビー位置を目標に、カーソル方向には飛ばない)
+        StartJumpCatch(true);
+    }
+
+
+    // ーーージャンプキャッチ開始処理ーーー
+    // useFrisbeePosAsTarget=trueの場合はフリスビーの現在位置を着地X目標とする
+    // (壁ヒット救済キャッチ用、犬が壁を突き抜けるのを防ぐ)
+    // useFrisbeePosAsTarget=falseの場合はカーソル位置を着地X目標とする
+    // (通常のジャンプキャッチ用)
+
+    private void StartJumpCatch(bool useFrisbeePosAsTarget)
+    {
+        currentMode = DogMode.JumpCatching;
+
+        trackedFrisbee.OnCaught();
+
+        jumpCatchStartPos = transform.position;
+        jumpCatchPeakY = trackedFrisbee.Position.y;
+
+        if (useFrisbeePosAsTarget)
+        {
+            jumpCatchTargetX = trackedFrisbee.Position.x;
+        }
+        else if (cursor != null)
+        {
+            jumpCatchTargetX = cursor.transform.position.x;
+        }
+        else
+        {
+            jumpCatchTargetX = trackedFrisbee.Position.x;
+        }
+
+        // 滞空時間を物理計算から逆算：T = 2 * sqrt(2h/g)
+        float h = jumpCatchPeakY - jumpCatchStartPos.y;
+        float g = Mathf.Abs(Physics2D.gravity.y) * rb.gravityScale;
+
+        if (g > 0f && h > 0f)
+        {
+            jumpCatchDuration = 2f * Mathf.Sqrt(2f * h / g);
+        }
+        else
+        {
+            jumpCatchDuration = 0.5f;
+        }
+
+        jumpCatchElapsed = 0f;
+
+        rb.bodyType = RigidbodyType2D.Kinematic;
+        rb.linearVelocity = Vector2.zero;
+
+        if (jumpCatchTargetX > jumpCatchStartPos.x)
+        {
+            facingDirection = 1;
+        }
+        else
+        {
+            facingDirection = -1;
+        }
+    }
+
+
+    // ーーージャンプキャッチ中の移動処理ーーー
+
+    private void UpdateJumpCatchMovement()
+    {
+        jumpCatchElapsed += Time.fixedDeltaTime;
+
+        float t = jumpCatchElapsed / jumpCatchDuration;
+
+        if (t >= 1f)
+        {
+            t = 1f;
+            ApplyJumpCatchPosition(t);
+            EndJumpCatch();
+            return;
+        }
+
+        ApplyJumpCatchPosition(t);
+    }
+
+
+    // ーーージャンプキャッチ軌道の位置を計算・適用ーーー
+
+    private void ApplyJumpCatchPosition(float t)
+    {
+        // 横方向：二次関数イーズアウト 1 - (1-t)^2
+        float easedT = 1f - (1f - t) * (1f - t);
+        float currentX = Mathf.Lerp(jumpCatchStartPos.x, jumpCatchTargetX, easedT);
+
+        // 縦方向：4t(1-t)で放物線(t=0で0、t=0.5で1、t=1で0)
+        float heightT = 4f * t * (1f - t);
+        float currentY = jumpCatchStartPos.y + (jumpCatchPeakY - jumpCatchStartPos.y) * heightT;
+
+        rb.MovePosition(new Vector2(currentX, currentY));
+    }
+
+
+    // ーーージャンプキャッチ終了処理ーーー
+
+    private void EndJumpCatch()
+    {
+        rb.bodyType = RigidbodyType2D.Dynamic;
+        rb.linearVelocity = Vector2.zero;
+
+        EnterWaitingMode();
+    }
+
+
+    // ーーーフリスビーキャッチの検知(地上キャッチ)ーーー
+
+    private void OnTriggerStay2D(Collider2D other)
+    {
+        if (currentMode != DogMode.Fetch)
+        {
+            return;
+        }
+
+        FrisbeeController frisbee = other.GetComponent<FrisbeeController>();
+
+        if (frisbee == null)
+        {
+            return;
+        }
+
+        if (frisbee != trackedFrisbee)
+        {
+            return;
+        }
+
+        if (!frisbee.IsLanded)
+        {
+            return;
+        }
+
+        ExecuteCatch(frisbee);
+    }
+
+
+    // ーーーキャッチ処理(地上キャッチ)ーーー
+
+    private void ExecuteCatch(FrisbeeController frisbee)
+    {
+        frisbee.OnCaught();
+        EnterWaitingMode();
+        StopHorizontalMovement();
+    }
+
+
+    // ーーーキャッチ中のフリスビー位置を更新ーーー
+
+    private void UpdateCaughtFrisbeePosition()
+    {
+        if (trackedFrisbee == null)
+        {
+            return;
+        }
+
+        if (!trackedFrisbee.IsCaught)
+        {
+            return;
+        }
+
+        Vector2 mouthPos = GetMouthWorldPosition();
+        trackedFrisbee.SetCaughtPosition(mouthPos);
+    }
+
+
+    // ーーー犬の口のワールド座標を計算ーーー
+
+    private Vector2 GetMouthWorldPosition()
+    {
+        Vector2 center = (Vector2)transform.position;
+        return new Vector2(
+            center.x + (mouthOffset.x * facingDirection),
+            center.y + mouthOffset.y
+        );
+    }
+
+
     // ーーーフリスビー投擲の検知ーーー
-    // FrisbeeThrowerに新しいフリスビーが生成されたら、行ってこいモード開始の準備をする
 
     private void CheckFrisbeeThrown()
     {
@@ -226,18 +864,16 @@ public class DogController : MonoBehaviour
 
         FrisbeeController currentFrisbee = frisbeeThrower.CurrentFrisbee;
 
-        // 通常モードのときに新しいフリスビーが現れたら、行ってこいモードへの移行を予約する
-        // (trackedFrisbeeと別物のフリスビーが現れたら新規投擲とみなす)
         if (currentMode == DogMode.Normal && currentFrisbee != null && currentFrisbee != trackedFrisbee)
         {
             trackedFrisbee = currentFrisbee;
             fetchStartDelayTimer = fetchStartDelay;
+            wasFrisbeeDecelerating = false;
         }
     }
 
 
     // ーーー行ってこいモード開始のディレイタイマー更新ーーー
-    // ディレイ時間が経過したら、行ってこいモードに突入する
 
     private void UpdateFetchStartDelay()
     {
@@ -257,12 +893,10 @@ public class DogController : MonoBehaviour
 
 
     // ーーー行ってこいモードの移動処理ーーー
-    // 追いかけ中のフリスビーへ向かって走る
-    // フリスビーが地面に着いてかつ十分近づいたら待機モードへ移行する
+    // フリスビーが犬より下にある+接地中の時は、段差から落とすために強制前進する
 
     private void UpdateFetchMovement()
     {
-        // フリスビーが消えていれば通常モードに戻す
         if (trackedFrisbee == null)
         {
             currentMode = DogMode.Normal;
@@ -271,17 +905,9 @@ public class DogController : MonoBehaviour
 
         Vector2 frisbeePos = trackedFrisbee.Position;
         float dx = frisbeePos.x - transform.position.x;
+        float dy = frisbeePos.y - transform.position.y;
         float distanceX = Mathf.Abs(dx);
 
-        // フリスビーが着地済みで、犬が十分近づいたら待機モードへ
-        if (trackedFrisbee.IsLanded && distanceX < fetchArriveThreshold)
-        {
-            currentMode = DogMode.Waiting;
-            StopHorizontalMovement();
-            return;
-        }
-
-        // フリスビーへ向かう方向を決定
         int directionToFrisbee;
         if (dx > 0f)
         {
@@ -292,12 +918,20 @@ public class DogController : MonoBehaviour
             directionToFrisbee = -1;
         }
 
-        // 通り過ぎを防ぐ：目標が近い場合は速度を抑える
+        // フリスビーが犬より十分下にある + 接地してる場合は、段差から落とすために強制前進
+        bool needDropDown = (dy <= -fetchDropDownThreshold) && CheckGrounded();
+
         float maxStepDistance = fetchModeMoveSpeed * Time.fixedDeltaTime;
 
         float currentSpeed;
-        if (distanceX < maxStepDistance)
+        if (needDropDown)
         {
+            // 段差から落とす：X差に関係なく最大速度で進む
+            currentSpeed = fetchModeMoveSpeed;
+        }
+        else if (distanceX < maxStepDistance)
+        {
+            // 通常時：通り過ぎ防止のため、X差が小さいときは速度を抑える
             currentSpeed = distanceX / Time.fixedDeltaTime;
         }
         else
@@ -309,13 +943,11 @@ public class DogController : MonoBehaviour
         v.x = directionToFrisbee * currentSpeed;
         rb.linearVelocity = v;
 
-        // 進行方向で見た目を更新
         facingDirection = directionToFrisbee;
     }
 
 
     // ーーー水平移動を停止ーーー
-    // 待機モードなど、横方向の動きを止めたい時に使う
 
     private void StopHorizontalMovement()
     {
@@ -325,13 +957,16 @@ public class DogController : MonoBehaviour
     }
 
 
-    // ーーー衝突発生時の処理ーーー
-    // 衝突した瞬間、接触点の法線を見て「上から」か「横から」かを判定する
-    // 横や下からの衝突なら、その特定の相手との衝突を無効化してすり抜けさせる
+    // ーーー衝突発生時の処理(プレイヤーとのすり抜け制御、通常モード/Fetch/JumpCatching用)ーーー
+    // 待機モード・おかえりモード中は別の仕組み(UpdateWaitingCollision)で衝突制御するのでスキップ
 
     private void OnCollisionEnter2D(Collision2D collision)
     {
-        // プレイヤーじゃなければ何もしない
+        if (currentMode == DogMode.Waiting || currentMode == DogMode.Return)
+        {
+            return;
+        }
+
         if (collision.gameObject != player.gameObject)
         {
             return;
@@ -341,11 +976,9 @@ public class DogController : MonoBehaviour
 
         if (normal.y <= -upwardCollisionThreshold)
         {
-            // 上から乗られた → 衝突を維持する
             return;
         }
 
-        // 横や下からの衝突 → 衝突を無効化してすり抜けさせる
         Physics2D.IgnoreCollision(collision.collider, boxCollider, true);
 
         if (!ignoredColliders.Contains(collision.collider))
@@ -356,9 +989,15 @@ public class DogController : MonoBehaviour
 
 
     // ーーーすり抜け中コライダーの再有効化チェックーーー
+    // 待機モード・おかえりモード中はこの処理を行わない(別ロジックで管理してる)
 
     private void UpdateIgnoredColliders()
     {
+        if (currentMode == DogMode.Waiting || currentMode == DogMode.Return)
+        {
+            return;
+        }
+
         for (int i = ignoredColliders.Count - 1; i >= 0; i--)
         {
             Collider2D ignored = ignoredColliders[i];
@@ -449,7 +1088,7 @@ public class DogController : MonoBehaviour
     }
 
 
-    // ーーージャンプ初速度の逆算ーーー
+    // ーーージャンプ初速度の逆算(通常モードのジャンプ連動用)ーーー
 
     private void CalculateJumpVelocity()
     {
@@ -461,8 +1100,21 @@ public class DogController : MonoBehaviour
             return;
         }
 
-        // エネルギー保存則：v0 = √(2 * g * h)
         calculatedJumpVelocity = Mathf.Sqrt(2f * effectiveGravity * jumpMaxHeight);
+    }
+
+
+    // ーーー指定高さに対するジャンプ初速度を計算ーーー
+    // h = v² / 2g  →  v = √(2gh)
+
+    private float CalculateJumpVelocityForHeight(float heightInUnits)
+    {
+        float effectiveGravity = Mathf.Abs(Physics2D.gravity.y) * rb.gravityScale;
+        if (effectiveGravity <= 0f)
+        {
+            return 0f;
+        }
+        return Mathf.Sqrt(2f * effectiveGravity * heightInUnits);
     }
 
 
@@ -502,32 +1154,79 @@ public class DogController : MonoBehaviour
 
 
     // ーーー壁に引っかかった時の自動ジャンプーーー
-    // 通常モードでは追従中、行ってこいモードでは常に発動する
+    // 接地中 + 進行方向に壁あり、の時に発動
+    // wallJumpModeに応じてA案(事前計測) or B案(段階的)で必要な高さを決める
 
     private void HandleStuckJump()
     {
-        // 通常モード時、追従中じゃないなら何もしない
         if (currentMode == DogMode.Normal && !dogShouldFollow)
         {
             return;
         }
 
-        // 接地していないならジャンプできない
         if (!CheckGrounded())
         {
             return;
         }
 
-        // 進行方向に壁がなければ何もしない
         if (!CheckWallAhead())
         {
             return;
         }
 
-        // 全条件を満たしたのでジャンプ発動
+        int requiredMasses;
+        switch (wallJumpMode)
+        {
+            case WallJumpMode.Predictive:
+                requiredMasses = MeasureWallHeightPredictive();
+                break;
+            case WallJumpMode.Stepwise:
+                requiredMasses = 1;  // TODO: B案実装、ひとまず1マスにしておく
+                break;
+            default:
+                requiredMasses = 1;
+                break;
+        }
+
+        if (requiredMasses <= 0)
+        {
+            return;
+        }
+
+        // 必要な高さに応じたジャンプ初速度を計算してジャンプ
+        float requiredHeightInUnits = requiredMasses * cellSize;
+        float jumpVelocity = CalculateJumpVelocityForHeight(requiredHeightInUnits);
+
         Vector2 v = rb.linearVelocity;
-        v.y = calculatedJumpVelocity;
+        v.y = jumpVelocity;
         rb.linearVelocity = v;
+    }
+
+
+    // ーーーA案：壁の高さを事前計測ーーー
+    // 進行方向の壁の真上を1マス、2マス、3マスと順にチェック
+    // 最初に何もない高さがジャンプ目標
+    // 全部壁ならmaxAutoJumpHeightでジャンプ(永遠ジャンプ)
+
+    private int MeasureWallHeightPredictive()
+    {
+        Vector2 dogPos = transform.position;
+        float probeX = dogPos.x + (wallProbeOffsetX * facingDirection);
+
+        for (int h = 1; h <= maxAutoJumpHeight; h++)
+        {
+            // 犬の足元(コライダー下端)からhマス上の位置を測る
+            float probeY = GetGroundCheckOrigin().y + (h * cellSize);
+            Vector2 origin = new Vector2(probeX, probeY);
+
+            Collider2D hit = Physics2D.OverlapBox(origin, wallProbeSize, 0f, groundLayer);
+            if (hit == null)
+            {
+                return h;  // この高さなら越えられる
+            }
+        }
+
+        return maxAutoJumpHeight;  // 越えられない壁、最大高さで永遠ジャンプ
     }
 
 
@@ -603,7 +1302,6 @@ public class DogController : MonoBehaviour
             return;
         }
 
-        // 目標位置へ向かう方向を求める
         int directionToTarget;
         if (dx > 0f)
         {
@@ -614,7 +1312,6 @@ public class DogController : MonoBehaviour
             directionToTarget = -1;
         }
 
-        // 通り過ぎを防ぐために、目標が近い場合は速度を抑える
         float maxStepDistance = normalModeMoveSpeed * Time.fixedDeltaTime;
 
         float currentSpeed;
@@ -684,13 +1381,11 @@ public class DogController : MonoBehaviour
 
     private void OnDrawGizmos()
     {
-        // boxColliderがまだ取得されていない場合は自前で取得
         if (boxCollider == null)
         {
             boxCollider = GetComponent<BoxCollider2D>();
         }
 
-        // 接地判定ボックスの可視化
         if (boxCollider != null)
         {
             Vector2 origin = GetGroundCheckOrigin();
@@ -714,7 +1409,6 @@ public class DogController : MonoBehaviour
             Gizmos.DrawWireCube(origin, groundCheckSize);
         }
 
-        // 壁検知ボックスの可視化
         Vector2 wallOrigin = GetWallCheckOrigin();
         if (Application.isPlaying)
         {
@@ -733,32 +1427,81 @@ public class DogController : MonoBehaviour
         }
         Gizmos.DrawWireCube(wallOrigin, wallCheckSize);
 
-        // 軌跡関連は実行中のみ表示
+        Gizmos.color = Color.magenta;
+        int dirForGizmo;
+        if (facingDirection == 0)
+        {
+            dirForGizmo = 1;
+        }
+        else
+        {
+            dirForGizmo = facingDirection;
+        }
+        Vector2 mouthPos = new Vector2(
+            transform.position.x + (mouthOffset.x * dirForGizmo),
+            transform.position.y + mouthOffset.y
+        );
+        Gizmos.DrawWireSphere(mouthPos, 0.1f);
+
+        // ジャンプキャッチ判定距離(黄色の円)
+        Gizmos.color = Color.yellow;
+        Gizmos.DrawWireSphere(transform.position, jumpCatchDistance);
+
+        // おかえりモード時のフリスビー回収判定距離(オレンジの円)
+        Gizmos.color = new Color(1f, 0.5f, 0f);
+        Gizmos.DrawWireSphere(transform.position, returnPickupDistance);
+
+        // 待機・おかえりモード時の上空判定ライン(青い水平線)
+        Gizmos.color = Color.blue;
+        Vector3 lineStart = new Vector3(transform.position.x - 1f, transform.position.y + waitingPlayerAboveThreshold, 0f);
+        Vector3 lineEnd = new Vector3(transform.position.x + 1f, transform.position.y + waitingPlayerAboveThreshold, 0f);
+        Gizmos.DrawLine(lineStart, lineEnd);
+
+        // 壁の高さ計測位置の可視化(進行方向にだけ表示、maxAutoJumpHeightマス分)
+        if (boxCollider != null)
+        {
+            float probeX = transform.position.x + (wallProbeOffsetX * dirForGizmo);
+            float groundY = GetGroundCheckOrigin().y;
+
+            for (int h = 1; h <= maxAutoJumpHeight; h++)
+            {
+                Vector2 origin = new Vector2(probeX, groundY + (h * cellSize));
+
+                if (Application.isPlaying)
+                {
+                    Collider2D hit = Physics2D.OverlapBox(origin, wallProbeSize, 0f, groundLayer);
+                    Gizmos.color = (hit != null) ? Color.red : Color.green;
+                }
+                else
+                {
+                    Gizmos.color = Color.gray;
+                }
+
+                Gizmos.DrawWireCube(origin, wallProbeSize);
+            }
+        }
+
         if (!Application.isPlaying || trail == null || trail.Count == 0)
         {
             return;
         }
 
-        // プレイヤーの軌跡を白い線で表示
         Gizmos.color = Color.white;
         for (int i = 0; i < trail.Count - 1; i++)
         {
             Gizmos.DrawLine(trail[i], trail[i + 1]);
         }
 
-        // 軌跡の各点を小さな点で表示
         Gizmos.color = Color.gray;
         for (int i = 0; i < trail.Count; i++)
         {
             Gizmos.DrawWireSphere(trail[i], 0.05f);
         }
 
-        // 犬の目標位置を緑の球で表示
         Gizmos.color = Color.green;
         Vector2 target = GetTrailPositionAtDistance(followDistance);
         Gizmos.DrawWireSphere(target, 0.2f);
 
-        // すり抜け中の状態をシアンの円で表示
         Gizmos.color = Color.cyan;
         Gizmos.DrawWireSphere(transform.position, collisionResetDistance);
     }
