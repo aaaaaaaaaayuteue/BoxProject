@@ -14,6 +14,9 @@ public class CursorController : MonoBehaviour
     [Header("プレイヤーからの垂直オフセット(ユニット、正の値で上)")]
     [SerializeField] private float verticalOffset = 0f;
 
+    [Header("壁として扱うレイヤー(カーソルがめり込まないようにブロックする)")]
+    [SerializeField] private LayerMask groundLayer;
+
     // ※ カーソルの大きさはTransform.Scaleで調整する
     // ※ Sceneビューでドラッグするか、InspectorのTransform > Scaleで変更可能
     // ※ 当たり判定や挙動には関係ないため、SerializeFieldでは管理しない
@@ -57,16 +60,51 @@ public class CursorController : MonoBehaviour
 
     // ーーーカーソル位置の更新ーーー
     // プレイヤーの位置と向きを取得して、その方向に固定距離ずらした位置に自分を移動する
+    // ただし、目前に壁がある場合は壁の表面にぴったりつくようにブロックする(壁にめり込まない)
 
     private void UpdateCursorPosition()
     {
         // プレイヤーの向き(+1=右、-1=左)を取得
         int direction = player.FacingDirection;
 
-        // プレイヤー位置から向き方向に距離分ずらす
+        // プレイヤー位置とカーソルY座標を計算
         Vector2 playerPos = player.transform.position;
-        float targetX = playerPos.x + (distanceFromPlayer * direction);
         float targetY = playerPos.y + verticalOffset;
+
+        // カーソルの幅の半分(壁判定時の補正で使う)
+        float cursorHalfWidth = Mathf.Abs(transform.localScale.x) * 0.5f;
+
+        // 理想位置のX(壁判定なしの基本位置)
+        float idealX = playerPos.x + (distanceFromPlayer * direction);
+
+        // プレイヤーから理想位置までX方向にRaycastを飛ばして、壁があるかチェック
+        // 始点はカーソルのY位置に合わせる(プレイヤーのYにverticalOffsetを足した位置)
+        Vector2 rayOrigin = new Vector2(playerPos.x, targetY);
+        Vector2 rayDirection = new Vector2(direction, 0f);
+        float rayLength = distanceFromPlayer;
+
+        RaycastHit2D hit = Physics2D.Raycast(rayOrigin, rayDirection, rayLength, groundLayer);
+
+        float targetX;
+        if (hit.collider != null)
+        {
+            // 壁にヒット：壁の表面からカーソル幅の半分だけ手前にずらす
+            // (カーソルの壁側の側面が壁の表面にピタッと一致、隙間なし)
+            targetX = hit.point.x - (cursorHalfWidth * direction);
+
+            // プレイヤーが壁の中にいる等で、targetXがプレイヤーより手前(逆側)になる場合
+            // カーソルがプレイヤーの逆側に表示されないように、プレイヤー位置に置く
+            bool cursorBehindPlayer = (direction == 1 && targetX < playerPos.x) || (direction == -1 && targetX > playerPos.x);
+            if (cursorBehindPlayer)
+            {
+                targetX = playerPos.x;
+            }
+        }
+        else
+        {
+            // 壁にヒットしなかった：理想位置を使う
+            targetX = idealX;
+        }
 
         transform.position = new Vector3(targetX, targetY, transform.position.z);
     }
@@ -102,7 +140,7 @@ public class CursorController : MonoBehaviour
 
 
     // ーーーGizmos(エディタ上での可視化)ーーー
-    // Sceneビューでカーソルの範囲とプレイヤー側の側面を確認できるようにする
+    // Sceneビューでカーソルの範囲とプレイヤー側の側面、壁判定Raycastを確認できるようにする
     // カーソルの大きさはTransform.localScaleから取得するので、Sceneビューでドラッグして変更可能
 
     private void OnDrawGizmos()
@@ -117,14 +155,24 @@ public class CursorController : MonoBehaviour
         Gizmos.color = Color.yellow;
         Gizmos.DrawWireCube(transform.position, currentSize);
 
-        // プレイヤー側の側面を赤い縦線で表示(再生中のみ、playerが必要なため)
+        // プレイヤー側の側面を赤い縦線で表示、壁判定Raycastをシアンで表示(再生中のみ)
         if (Application.isPlaying && player != null)
         {
+            // プレイヤー側の側面を赤い縦線で表示
             Gizmos.color = Color.red;
             float nearX = GetNearSideX();
             Vector3 top = new Vector3(nearX, transform.position.y + currentSize.y * 0.5f, 0f);
             Vector3 bottom = new Vector3(nearX, transform.position.y - currentSize.y * 0.5f, 0f);
             Gizmos.DrawLine(top, bottom);
+
+            // 壁判定Raycastの可視化(プレイヤーから理想位置までシアンの線)
+            int direction = player.FacingDirection;
+            Vector2 playerPos = player.transform.position;
+            float rayY = playerPos.y + verticalOffset;
+            Vector3 rayStart = new Vector3(playerPos.x, rayY, 0f);
+            Vector3 rayEnd = new Vector3(playerPos.x + (distanceFromPlayer * direction), rayY, 0f);
+            Gizmos.color = Color.cyan;
+            Gizmos.DrawLine(rayStart, rayEnd);
         }
     }
 }

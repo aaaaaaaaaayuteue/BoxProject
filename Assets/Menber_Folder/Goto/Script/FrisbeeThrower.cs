@@ -17,6 +17,9 @@ public class FrisbeeThrower : MonoBehaviour
     [Header("プレイヤーの中心からのフリスビー発射位置オフセット")]
     [SerializeField] private Vector2 spawnOffset = new Vector2(0f, 0.3f);
 
+    [Header("壁として扱うレイヤー(生成位置がこのレイヤーの中ならプレイヤーX位置に補正)")]
+    [SerializeField] private LayerMask groundLayer;
+
     // ーーー入力システム関連ーーー
     private PlayerInputActions inputActions;
     private InputAction throwAction;
@@ -87,6 +90,17 @@ public class FrisbeeThrower : MonoBehaviour
         Vector2 actualOffset = new Vector2(spawnOffset.x * direction, spawnOffset.y);
         Vector2 spawnPos = (Vector2)player.transform.position + actualOffset;
 
+        // 生成位置が壁の中の場合、X座標だけプレイヤーの位置に補正(Yはオフセット維持)
+        // (壁にめり込んだ状態で生成されないようにする)
+        Collider2D wallHit = Physics2D.OverlapPoint(spawnPos, groundLayer);
+        Debug.Log($"[FrisbeeThrower] spawnPos={spawnPos}, wallHit={wallHit}, playerPos={(Vector2)player.transform.position}");
+
+        if (wallHit != null)
+        {
+            spawnPos = new Vector2(player.transform.position.x, spawnPos.y);
+            Debug.Log($"[FrisbeeThrower] 補正後 spawnPos={spawnPos}, 補正後wallHit={Physics2D.OverlapPoint(spawnPos, groundLayer)}");
+        }
+
         GameObject frisbeeObj = Instantiate(frisbeePrefab, spawnPos, Quaternion.identity);
         currentFrisbee = frisbeeObj.GetComponent<FrisbeeController>();
 
@@ -118,6 +132,12 @@ public class FrisbeeThrower : MonoBehaviour
         int direction = player.FacingDirection;
         Vector2 actualOffset = new Vector2(spawnOffset.x * direction, spawnOffset.y);
         Vector2 spawnPos = (Vector2)player.transform.position + actualOffset;
+
+        // 生成位置が壁の中の場合、X座標だけプレイヤーの位置に補正(実際の生成と同じ挙動を可視化)
+        if (Application.isPlaying && Physics2D.OverlapPoint(spawnPos, groundLayer) != null)
+        {
+            spawnPos = new Vector2(player.transform.position.x, spawnPos.y);
+        }
 
         // マゼンタ色の小さな球で発射位置を表示
         Gizmos.color = Color.magenta;

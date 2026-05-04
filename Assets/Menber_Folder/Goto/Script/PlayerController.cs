@@ -31,12 +31,29 @@ public class PlayerController : MonoBehaviour
     [Header("接地判定ボックスのY方向オフセット(コライダー下端からの相対位置、負の値でさらに下)")]
     [SerializeField] private float groundCheckOffsetY = 0f;
 
+    [Header("乗ってる判定のマージン(犬の上端よりプレイヤーがこの値以上上にいたら乗ってる扱い、0で犬の上端ピッタリ)")]
+    [SerializeField] private float ridingDogMargin = 0f;
+
     // ーーー向きーーー
     [Header("ゲーム開始時のプレイヤーの向き(+1=右、-1=左)")]
     [SerializeField] private int initialFacingDirection = 1;
 
     [Header("元のスプライト画像が右向きならtrue、左向きならfalse")]
     [SerializeField] private bool spriteOriginallyFacesRight = true;
+
+    // ーーー死亡・リスポーン関連ーーー
+    [Header("ーーーーーーー ここから下は死亡・リスポーン関連 ーーーーーーー")]
+    [Header("リスタート管理のGameManager")]
+    [SerializeField] private GameManager gameManager;
+
+    [Header("スパイクとして扱うレイヤー(Spikeのみ、触れたら死亡)")]
+    [SerializeField] private LayerMask spikeLayer;
+
+    [Header("死亡中のプレイヤーの色")]
+    [SerializeField] private Color deathColor = Color.red;
+
+    [Header("死亡してからリスタートまでの時間(秒)")]
+    [SerializeField] private float deathFreezeDuration = 0.5f;
 
     // ーーー内部参照ーーー
     private Rigidbody2D rb;
@@ -62,12 +79,19 @@ public class PlayerController : MonoBehaviour
     // ーーー向き状態ーーー
     private int facingDirection;  // 現在の向き(+1=右、-1=左)
 
+    // ーーー死亡状態管理ーーー
+    private bool isDead;                          // 死亡中かどうか
+    private float deathFreezeTimer;               // 死亡フリーズの残り時間
+    private Color originalColor;                  // 死亡前の元の色(リスポーン時に戻す)
+    private RigidbodyType2D originalBodyType;     // 死亡前の元のBodyType(リスポーン時に戻す)
+
     // ーーー外部公開プロパティーーー
     public bool IsGrounded => CheckGrounded();
     public bool IsRidingDog => CheckRidingDog();
     public float CalculatedJumpVelocity => calculatedJumpVelocity;
     public int FacingDirection => facingDirection;
     public bool JustJumped => justJumped;
+    public bool IsDead => isDead;
 
 
     // ーーーUnityイベントーーー
@@ -92,6 +116,10 @@ public class PlayerController : MonoBehaviour
 
         // 起動時にスプライトの反転状態も初期向きに合わせる
         ApplySpriteFlip();
+
+        // 元の色とBodyTypeを記録(リスポーン時に戻すため)
+        originalColor = spriteRenderer.color;
+        originalBodyType = rb.bodyType;
     }
 
     private void OnEnable()
@@ -109,6 +137,13 @@ public class PlayerController : MonoBehaviour
 
     private void Update()
     {
+        // 死亡中はフリーズタイマーを更新するだけ、他は何もしない
+        if (isDead)
+        {
+            UpdateDeathFreezeTimer();
+            return;
+        }
+
         // 入力読み取りはUpdateで(フレームごとに最新の入力を取りたいため)
         ReadInputs();
 
@@ -121,6 +156,12 @@ public class PlayerController : MonoBehaviour
 
     private void FixedUpdate()
     {
+        // 死亡中は物理処理を全部スキップ(完全フリーズ)
+        if (isDead)
+        {
+            return;
+        }
+
         // ジャンプ初速度は重力に依存するので毎FixedUpdateで再計算する
         // 実行中にGravity Scaleが変更されても即座に反映できるようにするため
         CalculateJumpVelocity();
@@ -128,6 +169,102 @@ public class PlayerController : MonoBehaviour
         // 物理演算系の処理は固定間隔のFixedUpdateで(フレームレートに依存させないため)
         HorizontalMove();
         HandleJump();
+    }
+
+
+    // ーーースパイク接触検知ーーー
+    // スパイクレイヤーのオブジェクトに触れたら死亡
+
+    private void OnTriggerEnter2D(Collider2D other)
+    {
+        // 既に死亡中なら何もしない
+        if (isDead)
+        {
+            return;
+        }
+
+        // 触れたオブジェクトのレイヤーがspikeLayerに含まれているか確認
+        // (LayerMaskのビット演算で判定)
+        int otherLayerBit = 1 << other.gameObject.layer;
+        if ((spikeLayer.value & otherLayerBit) == 0)
+        {
+            return;
+        }
+
+        EnterDeathState();
+    }
+
+
+    // ーーー死亡状態への移行ーーー
+    // 色を変更、入力無効化、物理停止、フリーズタイマー開始
+
+    private void EnterDeathState()
+    {
+        isDead = true;
+        deathFreezeTimer = deathFreezeDuration;
+
+        // 色を死亡色に変更
+        spriteRenderer.color = deathColor;
+
+        // 速度をゼロにして、Kinematicにして重力も止める
+        rb.linearVelocity = Vector2.zero;
+        rb.angularVelocity = 0f;
+        rb.bodyType = RigidbodyType2D.Kinematic;
+
+        // 入力アクションを無効化(押されてもReadValueやWasPressedThisFrameが反応しなくなる)
+        inputActions.Player.Disable();
+    }
+
+
+    // ーーー死亡フリーズタイマーの更新ーーー
+    // タイマーが0になったらGameManagerにリスタート要求
+
+    private void UpdateDeathFreezeTimer()
+    {
+        deathFreezeTimer -= Time.deltaTime;
+
+        if (deathFreezeTimer <= 0f)
+        {
+            if (gameManager != null)
+            {
+                gameManager.ExecuteRestart();
+            }
+        }
+    }
+
+
+    // ーーーリスポーン処理(GameManagerから呼ばれる)ーーー
+    // 指定された位置と向きで、プレイヤーを復帰させる
+
+    public void Respawn(Vector2 position, int facing)
+    {
+        // 位置を設定(Z座標は維持)
+        Vector3 newPos = new Vector3(position.x, position.y, transform.position.z);
+        transform.position = newPos;
+
+        // 向きを設定
+        facingDirection = facing;
+        ApplySpriteFlip();
+
+        // 色を元に戻す
+        spriteRenderer.color = originalColor;
+
+        // BodyTypeを元に戻す(Dynamic等)
+        rb.bodyType = originalBodyType;
+
+        // 速度をゼロにリセット(残ってる速度を引き継がないように)
+        rb.linearVelocity = Vector2.zero;
+        rb.angularVelocity = 0f;
+
+        // 入力を有効化
+        inputActions.Player.Enable();
+
+        // 入力状態もクリア(死亡中に押された入力が引き継がれないように)
+        horizontalInput = 0f;
+        jumpRequested = false;
+
+        // 死亡状態を解除
+        isDead = false;
     }
 
 
@@ -206,13 +343,23 @@ public class PlayerController : MonoBehaviour
 
 
     // ーーー水平移動ーーー
+    // プレイヤー入力がある時は普通の歩き、入力がない時は犬の上に乗ってれば犬の速度に追従
 
     private void HorizontalMove()
     {
-        // 現在の速度を取得し、X成分だけ入力値×移動速度で上書き
-        // Y成分(重力やジャンプによる縦速度)は維持する
         Vector2 v = rb.linearVelocity;
-        v.x = horizontalInput * moveSpeed;
+
+        if (horizontalInput != 0f)
+        {
+            // プレイヤーが入力してる時：普通の歩き(犬の上でも地面でも同じ操作感)
+            v.x = horizontalInput * moveSpeed;
+        }
+        else
+        {
+            // プレイヤー入力なし：犬の上に乗ってれば犬と一緒に動く、地面なら静止
+            v.x = GetRidingDogVelocityX();
+        }
+
         rb.linearVelocity = v;
     }
 
@@ -259,8 +406,8 @@ public class PlayerController : MonoBehaviour
 
 
     // ーーー犬に乗っているか判定ーーー
-    // 足元の判定ボックス内に「犬」レイヤーのコライダーがあるか確認する
-    // 接地判定とは別に犬限定で判定することで、ジャンプ感知のON/OFFなどに使える
+    // 足元の判定ボックスに「犬」レイヤーのコライダーがあって、かつプレイヤーが犬の上端より上にいる時だけtrue
+    // (横で重なってるだけだと、コライダーが触れててもfalseになる)
 
     private bool CheckRidingDog()
     {
@@ -269,7 +416,75 @@ public class PlayerController : MonoBehaviour
         // dogLayerだけを対象に判定
         Collider2D hit = Physics2D.OverlapBox(origin, groundCheckSize, 0f, dogLayer);
 
-        return hit != null;
+        if (hit == null)
+        {
+            return false;
+        }
+
+        // コライダーは触れてるが、本当に「上に乗ってる」のかをY座標で確認
+        // 犬のコライダーの上端より上にプレイヤーがいる時だけ「乗ってる」と判定
+        // (横で重なってる時は乗ってない扱いにして、犬の動きに引っ張られるのを防ぐ)
+        float dogTopY = GetDogTopY(hit);
+        float playerY = transform.position.y;
+
+        return (playerY - dogTopY) >= ridingDogMargin;
+    }
+
+
+    // ーーー乗ってる犬のX速度を取得ーーー
+    // 犬の上に乗っていない、または検出できない場合は0を返す
+    // (CheckRidingDogと同じ判定基準)
+
+    private float GetRidingDogVelocityX()
+    {
+        Vector2 origin = GetGroundCheckOrigin();
+        Collider2D hit = Physics2D.OverlapBox(origin, groundCheckSize, 0f, dogLayer);
+
+        if (hit == null)
+        {
+            return 0f;
+        }
+
+        // 本当に犬の上に乗ってるかY座標で確認
+        // (横で重なってる時は犬の速度を継承させない)
+        float dogTopY = GetDogTopY(hit);
+        float playerY = transform.position.y;
+
+        if ((playerY - dogTopY) < ridingDogMargin)
+        {
+            return 0f;
+        }
+
+        Rigidbody2D dogRb = hit.attachedRigidbody;
+        if (dogRb == null)
+        {
+            return 0f;
+        }
+
+        return dogRb.linearVelocity.x;
+    }
+
+
+    // ーーー犬のコライダーの上端のY座標を取得ーーー
+    // BoxCollider2Dならoffsetとsizeから直接計算、それ以外はboundsから取得
+    // 犬のスケール(transform.lossyScale)も考慮する
+
+    private float GetDogTopY(Collider2D dogCollider)
+    {
+        BoxCollider2D dogBox = dogCollider as BoxCollider2D;
+
+        if (dogBox != null)
+        {
+            // BoxCollider2Dの場合：オフセットとサイズから上端を計算
+            Vector2 dogPos = dogCollider.transform.position;
+            float yScale = Mathf.Abs(dogCollider.transform.lossyScale.y);
+            float dogCenterY = dogPos.y + dogBox.offset.y * yScale;
+            float dogHalfHeight = dogBox.size.y * yScale * 0.5f;
+            return dogCenterY + dogHalfHeight;
+        }
+
+        // BoxCollider2D以外の場合：コライダーのbounds(ワールド境界)から上端を取得
+        return dogCollider.bounds.max.y;
     }
 
 

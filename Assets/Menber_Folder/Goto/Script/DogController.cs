@@ -58,6 +58,12 @@ public class DogController : MonoBehaviour
     [Header("犬の口の位置(犬の中心からのオフセット、Xは向きで自動反転)")]
     [SerializeField] private Vector2 mouthOffset = new Vector2(0.4f, 0.1f);
 
+    [Header("座標ベースのキャッチ判定：X座標の許容差(ユニット)")]
+    [SerializeField] private float positionCatchXThreshold = 0.5f;
+
+    [Header("座標ベースのキャッチ判定：Y座標の許容差(ユニット)")]
+    [SerializeField] private float positionCatchYThreshold = 1.0f;
+
     [Header("ーーーーーーー ここから下は待機モード関連 ーーーーーーー")]
     [Header("キャッチ完了後、犬がプレイヤーの方を向くまでのディレイ(秒)")]
     [SerializeField] private float turnToPlayerDelay = 0.3f;
@@ -237,6 +243,65 @@ public class DogController : MonoBehaviour
         throwAction.Disable();
     }
 
+    // ーーーリスポーン処理(GameManagerから呼ばれる)ーーー
+    // プレイヤーが死亡した時、犬を指定位置に戻して通常モードにリセットする
+
+    public void Respawn(Vector2 position)
+    {
+        // 位置を設定(Z座標は維持)
+        Vector3 newPos = new Vector3(position.x, position.y, transform.position.z);
+        transform.position = newPos;
+
+        // BodyTypeをDynamicに戻す(ジャンプキャッチ中だとKinematicになってる可能性)
+        rb.bodyType = RigidbodyType2D.Dynamic;
+
+        // 速度をゼロにリセット
+        rb.linearVelocity = Vector2.zero;
+        rb.angularVelocity = 0f;
+
+        // モードを通常モードに戻す
+        currentMode = DogMode.Normal;
+
+        // フリスビー追跡をクリア(GameManager側でフリスビー本体は破壊済み)
+        trackedFrisbee = null;
+        wasFrisbeeDecelerating = false;
+        fetchStartDelayTimer = -1f;
+
+        // 軌跡をクリア(プレイヤーが瞬間移動するので、古い軌跡を引きずらない)
+        trail.Clear();
+        if (player != null)
+        {
+            lastRecordedPosition = player.transform.position;
+            trail.Add(lastRecordedPosition);
+        }
+
+        // 追従状態をリセット
+        playerIsMoving = false;
+        playerStateChangeTimer = 0f;
+        dogShouldFollow = false;
+
+        // ジャンプ予約をクリア
+        pendingJumpTimer = -1f;
+
+        // 待機モード関連の状態をクリア
+        waitingTurnTimer = -1f;
+        hasTurnedToPlayer = false;
+        waitingPlayerIsAbove = false;
+
+        // おかえりモード復帰関連の状態をクリア
+        needCollisionRestoreAfterFinish = false;
+
+        // すり抜け中のコライダーをすべて再有効化
+        ClearAllIgnoredColliders();
+
+        // プレイヤーとの衝突を有効に戻す(待機・おかえりモードの設定が残らないように)
+        SetPlayerCollisionIgnore(false);
+
+        // 向きをリセット(犬はプレイヤーの左側にリスポーンする想定なので、右向きにしてプレイヤーを見る形)
+        facingDirection = 1;
+        ApplySpriteFlip();
+    }
+
     private void Update()
     {
         CheckFrisbeeThrown();
@@ -273,6 +338,8 @@ public class DogController : MonoBehaviour
                 UpdateFetchMovement();
                 HandleStuckJump();
                 CheckWallFallRescueCatch();
+                CheckPositionBasedCatch();
+                UpdateWaitingCollision();
                 break;
 
             case DogMode.JumpCatching:
@@ -677,6 +744,44 @@ public class DogController : MonoBehaviour
         StartJumpCatch(true);
     }
 
+    // ーーー座標ベースのフリスビーキャッチ判定(保険)ーーー
+    // 犬とフリスビーのX座標が近い + Y座標も大差なければキャッチ
+    // フリスビーが減速or着地状態の時だけ発動(Flying中はジャンプキャッチを尊重、カーソル到達前のキャッチを防ぐ)
+    // コライダー重なりや既存のキャッチで取りこぼしたケースの保険
+
+    private void CheckPositionBasedCatch()
+    {
+        if (trackedFrisbee == null)
+        {
+            return;
+        }
+
+        // Flying中はNG(ジャンプキャッチを尊重、カーソル到達前のキャッチを防ぐ)
+        if (!trackedFrisbee.IsDecelerating && !trackedFrisbee.IsLanded)
+        {
+            return;
+        }
+
+        Vector2 dogPos = transform.position;
+        Vector2 frisbeePos = trackedFrisbee.Position;
+
+        float dx = Mathf.Abs(frisbeePos.x - dogPos.x);
+        float dy = Mathf.Abs(frisbeePos.y - dogPos.y);
+
+        if (dx > positionCatchXThreshold)
+        {
+            return;
+        }
+
+        if (dy > positionCatchYThreshold)
+        {
+            return;
+        }
+
+        // 範囲内：キャッチ発動
+        ExecuteCatch(trackedFrisbee);
+    }
+
 
     // ーーージャンプキャッチ開始処理ーーー
     // useFrisbeePosAsTarget=trueの場合はフリスビーの現在位置を着地X目標とする
@@ -888,6 +993,14 @@ public class DogController : MonoBehaviour
         {
             fetchStartDelayTimer = -1f;
             currentMode = DogMode.Fetch;
+
+            // 通常モードでのすり抜け状態をリセット(Fetch中はUpdateWaitingCollisionで位置ベース管理に切り替えるため)
+            ClearAllIgnoredColliders();
+            waitingPlayerIsAbove = false;
+
+            // Fetch開始時、プレイヤーが犬の上にいなければ衝突無効化(横から突っ込んだ時に押されないように)
+            // 以降はUpdateWaitingCollisionが位置ベースで切り替えてくれる
+            SetPlayerCollisionIgnore(true);
         }
     }
 
@@ -899,6 +1012,8 @@ public class DogController : MonoBehaviour
     {
         if (trackedFrisbee == null)
         {
+            // Fetchモードで衝突無効化されてる可能性があるので元に戻す
+            SetPlayerCollisionIgnore(false);
             currentMode = DogMode.Normal;
             return;
         }
@@ -962,7 +1077,7 @@ public class DogController : MonoBehaviour
 
     private void OnCollisionEnter2D(Collision2D collision)
     {
-        if (currentMode == DogMode.Waiting || currentMode == DogMode.Return)
+        if (currentMode == DogMode.Waiting || currentMode == DogMode.Return || currentMode == DogMode.Fetch)
         {
             return;
         }
@@ -993,7 +1108,7 @@ public class DogController : MonoBehaviour
 
     private void UpdateIgnoredColliders()
     {
-        if (currentMode == DogMode.Waiting || currentMode == DogMode.Return)
+        if (currentMode == DogMode.Waiting || currentMode == DogMode.Return || currentMode == DogMode.Fetch)
         {
             return;
         }
