@@ -1,0 +1,239 @@
+﻿{
+    "host":  "http://localhost:28872",
+    "keepConnected":  false,
+    "keepServerRunning":  false,
+    "generateSkillFiles":  false,
+    "transportMethod":  "streamableHttp",
+    "authOption":  "none",
+    "logLevel":  "Warning",
+    "timeoutMs":  10000,
+    "token":  null,
+    "tools":  [
+                  {
+                      "name":  "assets-find",
+                      "enabled":  true
+                  },
+                  {
+                      "name":  "assets-find-built-in",
+                      "enabled":  true
+                  },
+                  {
+                      "name":  "assets-get-data",
+                      "enabled":  true
+                  },
+                  {
+                      "name":  "assets-shader-list-all",
+                      "enabled":  true
+                  },
+                  {
+                      "name":  "gameobject-find",
+                      "enabled":  true
+                  },
+                  {
+                      "name":  "gameobject-component-get",
+                      "enabled":  true
+                  },
+                  {
+                      "name":  "gameobject-component-list-all",
+                      "enabled":  true
+                  },
+                  {
+                      "name":  "scene-get-data",
+                      "enabled":  true
+                  },
+                  {
+                      "name":  "scene-list-opened",
+                      "enabled":  true
+                  },
+                  {
+                      "name":  "script-read",
+                      "enabled":  true
+                  },
+                  {
+                      "name":  "package-list",
+                      "enabled":  true
+                  },
+                  {
+                      "name":  "package-search",
+                      "enabled":  true
+                  },
+                  {
+                      "name":  "object-get-data",
+                      "enabled":  true
+                  },
+                  {
+                      "name":  "screenshot-camera",
+                      "enabled":  true
+                  },
+                  {
+                      "name":  "screenshot-game-view",
+                      "enabled":  true
+                  },
+                  {
+                      "name":  "screenshot-scene-view",
+                      "enabled":  true
+                  },
+                  {
+                      "name":  "console-get-logs",
+                      "enabled":  true
+                  },
+                  {
+                      "name":  "editor-application-get-state",
+                      "enabled":  true
+                  },
+                  {
+                      "name":  "editor-selection-get",
+                      "enabled":  true
+                  },
+                  {
+                      "name":  "reflection-method-find",
+                      "enabled":  true
+                  },
+                  {
+                      "name":  "assets-create-folder",
+                      "enabled":  false
+                  },
+                  {
+                      "name":  "assets-delete",
+                      "enabled":  false
+                  },
+                  {
+                      "name":  "assets-copy",
+                      "enabled":  false
+                  },
+                  {
+                      "name":  "assets-move",
+                      "enabled":  false
+                  },
+                  {
+                      "name":  "assets-modify",
+                      "enabled":  false
+                  },
+                  {
+                      "name":  "assets-refresh",
+                      "enabled":  false
+                  },
+                  {
+                      "name":  "assets-material-create",
+                      "enabled":  false
+                  },
+                  {
+                      "name":  "assets-prefab-instantiate",
+                      "enabled":  false
+                  },
+                  {
+                      "name":  "assets-prefab-create",
+                      "enabled":  false
+                  },
+                  {
+                      "name":  "assets-prefab-open",
+                      "enabled":  false
+                  },
+                  {
+                      "name":  "assets-prefab-close",
+                      "enabled":  false
+                  },
+                  {
+                      "name":  "assets-prefab-save",
+                      "enabled":  false
+                  },
+                  {
+                      "name":  "gameobject-create",
+                      "enabled":  false
+                  },
+                  {
+                      "name":  "gameobject-destroy",
+                      "enabled":  false
+                  },
+                  {
+                      "name":  "gameobject-duplicate",
+                      "enabled":  false
+                  },
+                  {
+                      "name":  "gameobject-modify",
+                      "enabled":  false
+                  },
+                  {
+                      "name":  "gameobject-set-parent",
+                      "enabled":  false
+                  },
+                  {
+                      "name":  "gameobject-component-add",
+                      "enabled":  false
+                  },
+                  {
+                      "name":  "gameobject-component-destroy",
+                      "enabled":  false
+                  },
+                  {
+                      "name":  "gameobject-component-modify",
+                      "enabled":  false
+                  },
+                  {
+                      "name":  "scene-create",
+                      "enabled":  false
+                  },
+                  {
+                      "name":  "scene-open",
+                      "enabled":  false
+                  },
+                  {
+                      "name":  "scene-save",
+                      "enabled":  false
+                  },
+                  {
+                      "name":  "scene-unload",
+                      "enabled":  false
+                  },
+                  {
+                      "name":  "scene-set-active",
+                      "enabled":  false
+                  },
+                  {
+                      "name":  "script-update-or-create",
+                      "enabled":  false
+                  },
+                  {
+                      "name":  "script-delete",
+                      "enabled":  false
+                  },
+                  {
+                      "name":  "script-execute",
+                      "enabled":  false
+                  },
+                  {
+                      "name":  "package-add",
+                      "enabled":  false
+                  },
+                  {
+                      "name":  "package-remove",
+                      "enabled":  false
+                  },
+                  {
+                      "name":  "object-modify",
+                      "enabled":  false
+                  },
+                  {
+                      "name":  "tests-run",
+                      "enabled":  false
+                  },
+                  {
+                      "name":  "editor-application-set-state",
+                      "enabled":  false
+                  },
+                  {
+                      "name":  "editor-selection-set",
+                      "enabled":  false
+                  },
+                  {
+                      "name":  "reflection-method-call",
+                      "enabled":  false
+                  }
+              ],
+    "prompts":  [
+
+                ],
+    "resources":  [
+
+                  ]
+}

@@ -1,0 +1,27 @@
+[mcp_servers.ai-game-developer]
+url = "http://localhost:28872"
+enabled = true
+startup_timeout_sec = 20
+tool_timeout_sec = 60
+enabled_tools = [
+  "assets-find",
+  "assets-find-built-in",
+  "assets-get-data",
+  "assets-shader-list-all",
+  "gameobject-find",
+  "gameobject-component-get",
+  "gameobject-component-list-all",
+  "scene-get-data",
+  "scene-list-opened",
+  "script-read",
+  "package-list",
+  "package-search",
+  "object-get-data",
+  "screenshot-camera",
+  "screenshot-game-view",
+  "screenshot-scene-view",
+  "console-get-logs",
+  "editor-application-get-state",
+  "editor-selection-get",
+  "reflection-method-find"
+]
