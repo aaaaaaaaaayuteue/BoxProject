@@ -369,45 +369,49 @@ public class PossessionController : MonoBehaviour
 
 
     // ーーーリスタート処理(GameManagerから呼ばれる)ーーー
-    // 初期本体に戻して、目を初期本体に追従させ、timeScaleと状態を初期化する
-    // 死亡した箱(初期本体以外も含む)は全部死亡状態をリセットする
-    // 位置のリセットは初期本体だけ(BoxController.Respawn)、他の箱は位置はそのまま
+    // 死亡した本体 (= currentBody、憑依先かもしれない) を checkpoint にリスポーンする
+    // それ以外の Box (initialBody含む、生きてるもの) は位置・状態とも触らない
+    // リスポーン後、Player は同じ Box (リスポーンした body) を引き続き操作する
+    //
+    // currentBody が null の場合のみ initialBody にフォールバック
+    //
+    // ※ ApplyControlledFlagToAllBoxes() は呼ばない:
+    //   それは全 Box の isPlayerBody/isInputDriven/transparent を触るため、
+    //   「他の Box は触らない」という今回の仕様と相性が悪い。
+    //   currentBody だけ直接フラグを再適用する。
 
     public void HandleRestart(Vector2 respawnPosition, int respawnFacing)
     {
-        if (initialBody == null)
+        // リスポーン対象は「現在の本体 = 死亡した body」
+        // 憑依してない元の Player (initialBody) は触らない (ユーザー要望)
+        BoxController bodyToRespawn = currentBody;
+        if (bodyToRespawn == null)
         {
-            Debug.LogWarning("[PossessionController] initialBody が未設定のためリスタートできません。Inspector で設定してください。", this);
+            // 異常時のフォールバック: initialBody を使う
+            bodyToRespawn = initialBody;
+        }
+        if (bodyToRespawn == null)
+        {
+            Debug.LogWarning("[PossessionController] リスポーン対象の Box が見つかりません(currentBody / initialBody 両方 null)。", this);
             return;
         }
 
-        // 全 BoxController の死亡状態をリセット(初期本体以外も含む、Kinematic+赤色のまま残らないように)
-        if (allBoxes != null)
-        {
-            for (int i = 0; i < allBoxes.Length; i++)
-            {
-                BoxController box = allBoxes[i];
-                if (box == null || box == initialBody)
-                {
-                    continue;
-                }
-                box.ResetDeathState();
-            }
-        }
+        // 死亡した body を checkpoint にリスポーン (位置リセット + 色 / BodyType / 速度 / 入力 / isDead クリア)
+        bodyToRespawn.Respawn(respawnPosition, respawnFacing);
 
-        // 現在の本体を初期本体に切り替え
-        currentBody = initialBody;
+        // currentBody はそのまま (引き続きこの body を操作する)
+        currentBody = bodyToRespawn;
 
-        // 全 BoxController の Player/InputDriven フラグと半透明をリセット
-        ApplyControlledFlagToAllBoxes();
+        // currentBody だけ Player/InputDriven/不透明を直接再適用 (他の Box には触らない)
+        // 憑依モード中に死亡した場合のため、半透明解除も明示的に行う
+        currentBody.SetTransparent(false);
+        currentBody.SetIsPlayerBody(true);
+        currentBody.SetInputDriven(true);
 
-        // 初期本体の位置・状態をリセット
-        initialBody.Respawn(respawnPosition, respawnFacing);
-
-        // 目を初期本体に追従させる
+        // 目を currentBody に追従させる (憑依モード中だった場合に魂が宙ぶらりんになるのを防ぐ)
         if (eyes != null)
         {
-            eyes.SetCurrentBody(initialBody);
+            eyes.SetCurrentBody(currentBody);
             eyes.SetMode(EyesController.EyesMode.Normal);
         }
 

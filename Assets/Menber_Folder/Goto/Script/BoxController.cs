@@ -105,6 +105,10 @@ public class BoxController : MonoBehaviour
     private Color originalColor;
     private RigidbodyType2D originalBodyType;
 
+    // ーーー外部からのデルタ移動(Moving Platform から渡される)ーーー
+    // LiftPlatform などが乗客を運ぶときに使う。FixedUpdate で1度だけ消費する
+    private Vector2 pendingExternalDelta;
+
     // ーーー外部公開プロパティーーー
     public bool IsGrounded => CheckGrounded();
     public bool IsDead => isDead;
@@ -170,6 +174,51 @@ public class BoxController : MonoBehaviour
         // 物理演算系の処理は固定間隔のFixedUpdateで(フレームレートに依存させないため)
         HorizontalMove();
         HandleJump();
+
+        // 外部からのデルタ移動(Moving Platform 運搬)を最後に MovePosition で加算
+        // BoxController 内で一括処理することで、linearVelocity 直書きとの競合によるカクつきを防ぐ
+        ApplyPendingExternalDelta();
+    }
+
+
+    // ーーー外部デルタの適用ーーー
+    // pendingExternalDelta が積まれていたら、velocity に反映してクリア
+    //
+    // ※ MovePosition ではなく velocity 経由で反映する理由:
+    //   Dynamic Rigidbody2D に対して MovePosition を呼ぶと、その物理ステップで
+    //   linearVelocity が上書きされる仕様があり、HorizontalMove が設定した
+    //   プレイヤー入力速度が無効化されてしまう (= リフトに乗ると入力が効かなくなる)
+    //
+    // ※ 入力駆動(プレイヤー)と非入力駆動(空箱)で挙動を分ける理由:
+    //   入力駆動: HorizontalMove で毎フレーム v.x = input * moveSpeed と上書きされるので、
+    //             外部 delta は += で「入力 + リフト運搬」を合成する。
+    //   非入力駆動: HorizontalMove で MoveTowards(v.x, 0, 0.5) の緩やかな減速しか入らないため、
+    //             += 加算だと毎フレーム純増 1.5 で累積し、空箱が高速で吹き飛ぶ問題があった。
+    //             X は = 代入で上書きして累積を断つ。Y は触らない(重力やジャンプの慣性を保持)。
+
+    private void ApplyPendingExternalDelta()
+    {
+        if (pendingExternalDelta == Vector2.zero)
+        {
+            return;
+        }
+        // delta (1フレーム分の位置変化) を velocity (秒速) に変換
+        Vector2 deltaVelocity = pendingExternalDelta / Time.fixedDeltaTime;
+
+        if (isInputDriven)
+        {
+            // 入力駆動(プレイヤー操作中) → 加算で入力と運搬を合成
+            rb.linearVelocity += deltaVelocity;
+        }
+        else
+        {
+            // 非入力駆動(空箱) → X のみ上書きして累積を断つ
+            Vector2 v = rb.linearVelocity;
+            v.x = deltaVelocity.x;
+            rb.linearVelocity = v;
+        }
+
+        pendingExternalDelta = Vector2.zero;
     }
 
 
@@ -215,6 +264,17 @@ public class BoxController : MonoBehaviour
     {
         horizontalInput = 0f;
         jumpRequested = false;
+    }
+
+
+    // 外部からデルタ移動を加算する(Moving Platform などが呼ぶ)
+    // 次の FixedUpdate でその delta だけ MovePosition で加算される
+    // rb.position 直接書き込みは BoxController の linearVelocity 制御と競合してカクつくため、
+    // BoxController 自身が物理ステップで一括処理することで滑らかに運搬される
+
+    public void AddExternalDelta(Vector2 delta)
+    {
+        pendingExternalDelta += delta;
     }
 
 
